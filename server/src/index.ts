@@ -1,14 +1,17 @@
 import fs from "fs"
-import path, { join } from "path"
 import http from "http"
+import { join } from "path"
+import bodyParser from "body-parser";
 import { User } from "./entity/User"
 import { AppDataSource } from "./data-source"
 import graphqlUploadExpress from "graphql-upload/graphqlUploadExpress.js";
 import { ApolloServer } from "apollo-server-express";
+import { pubSub } from "./pubsub";
 import { buildSchema } from "type-graphql";
 import express, { Express } from "express";
 import cookieParser from "cookie-parser"
-import { CoreResolver } from "./resolvers/core";
+import { UserResolver } from "./resolvers/user";
+import { COOKIE_NAME } from "./constants";
 require('dotenv').config()
 
 
@@ -17,7 +20,6 @@ AppDataSource.initialize().then(async () => {
     const user = new User()
     user.firstName = "Timber"
     user.lastName = "Saw"
-    user.age = 25
     await AppDataSource.manager.save(user)
 
     console.log("Loading users from the database...")
@@ -33,13 +35,30 @@ AppDataSource.initialize().then(async () => {
     );
     app.use(cookieParser());
     const apolloServer = new ApolloServer({
-        // uploads: false,
         schema: await buildSchema({
-            resolvers: [CoreResolver],
-            // pubSub: pubSub,
+            resolvers: [UserResolver],
             validate: false,
-        })
+        }),
+        context: ({ req, res, connection }) => {
+            if (connection) {
+                return { ...connection.context };
+            } else {
+                const token = req?.cookies[COOKIE_NAME];
+                return {
+                    req,
+                    res,
+                    pubSub,
+                    connection,
+                    token,
+                };
+            }
+        },
+        playground: true,
+        introspection: true,
+
     })
+    app.use(bodyParser.json());
+
     const httpServer = http.createServer(app);
     app.get(
         ["/"],
